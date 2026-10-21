@@ -1,4 +1,5 @@
 import { getSupabaseClient } from './supabase';
+import { ensureUUID, sanitizeUUIDOrNull } from './uuid';
 import {
   Subject,
   Assignment,
@@ -28,19 +29,19 @@ if (typeof window !== 'undefined' && !localStorage.getItem('studyflow_clean_v3')
 
 export const DEFAULT_PERIODS: AcademicPeriod[] = [
   {
-    id: 'per-1',
+    id: '10000000-0000-4000-8000-000000000001',
     name: '1º Trimestre',
     start_date: new Date(new Date().getFullYear(), 8, 15).toISOString().split('T')[0], // 15 Sept
     end_date: new Date(new Date().getFullYear(), 11, 20).toISOString().split('T')[0], // 20 Dic
   },
   {
-    id: 'per-2',
+    id: '10000000-0000-4000-8000-000000000002',
     name: '2º Trimestre',
     start_date: new Date(new Date().getFullYear(), 0, 8).toISOString().split('T')[0], // 8 Ene
     end_date: new Date(new Date().getFullYear(), 2, 28).toISOString().split('T')[0], // 28 Mar
   },
   {
-    id: 'per-3',
+    id: '10000000-0000-4000-8000-000000000003',
     name: '3º Trimestre',
     start_date: new Date(new Date().getFullYear(), 3, 10).toISOString().split('T')[0], // 10 Abr
     end_date: new Date(new Date().getFullYear(), 5, 20).toISOString().split('T')[0], // 20 Jun
@@ -137,16 +138,20 @@ class DataService {
   async saveSubject(subject: Subject): Promise<Subject> {
     this.setSyncState('saving');
     const local = this.getLocal<Subject[]>('subjects', DEFAULT_SUBJECTS);
-    const index = local.findIndex((s) => s.id === subject.id);
+    const validId = ensureUUID(subject.id);
+    const itemToSave: Subject = {
+      ...subject,
+      id: validId,
+      created_at: subject.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const index = local.findIndex((s) => s.id === itemToSave.id);
     const updated = [...local];
     if (index >= 0) {
-      updated[index] = { ...subject, updated_at: new Date().toISOString() };
+      updated[index] = itemToSave;
     } else {
-      updated.push({
-        ...subject,
-        id: subject.id || 'sub-' + Date.now(),
-        created_at: new Date().toISOString(),
-      });
+      updated.push(itemToSave);
     }
     this.setLocal('subjects', updated);
 
@@ -156,14 +161,20 @@ class DataService {
         const { data: user } = await supabase.auth.getUser();
         if (user?.user) {
           const payload = {
-            ...subject,
+            id: itemToSave.id,
             user_id: user.user.id,
-            updated_at: new Date().toISOString(),
+            name: itemToSave.name,
+            color: itemToSave.color || '#10b981',
+            teacher: itemToSave.teacher || null,
+            weekly_goal_minutes: itemToSave.weekly_goal_minutes || 180,
+            notes: itemToSave.notes || null,
+            created_at: itemToSave.created_at,
+            updated_at: itemToSave.updated_at,
           };
           const { data, error } = await supabase.from('subjects').upsert(payload).select().single();
           if (error) throw error;
           this.setSyncState('synced');
-          return data;
+          return data || itemToSave;
         }
       } catch (err) {
         console.error('[Supabase] Error saving subject to cloud:', err);
@@ -172,7 +183,7 @@ class DataService {
     }
 
     this.setSyncState(supabase ? 'synced' : 'local');
-    return index >= 0 ? updated[index] : updated[updated.length - 1];
+    return itemToSave;
   }
 
   async deleteSubject(id: string): Promise<void> {
@@ -226,15 +237,19 @@ class DataService {
   async saveAssignment(assignment: Assignment): Promise<Assignment> {
     this.setSyncState('saving');
     const local = this.getLocal<Assignment[]>('assignments', DEFAULT_ASSIGNMENTS);
-    const index = local.findIndex((a) => a.id === assignment.id);
-    const updated = [...local];
+    const validId = ensureUUID(assignment.id);
+    const validSubjectId = sanitizeUUIDOrNull(assignment.subject_id);
+
     const itemToSave: Assignment = {
       ...assignment,
-      id: assignment.id || 'asg-' + Date.now(),
+      id: validId,
+      subject_id: validSubjectId,
       created_at: assignment.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
+    const index = local.findIndex((a) => a.id === itemToSave.id);
+    const updated = [...local];
     if (index >= 0) {
       updated[index] = itemToSave;
     } else {
@@ -247,14 +262,45 @@ class DataService {
       try {
         const { data: user } = await supabase.auth.getUser();
         if (user?.user) {
-          const { data, error } = await supabase
+          const payload = {
+            id: itemToSave.id,
+            user_id: user.user.id,
+            subject_id: validSubjectId,
+            title: itemToSave.title,
+            description: itemToSave.description || null,
+            due_date: itemToSave.due_date,
+            priority: itemToSave.priority,
+            status: itemToSave.status,
+            estimated_minutes: itemToSave.estimated_minutes,
+            actual_minutes: itemToSave.actual_minutes,
+            completed_at: itemToSave.completed_at || null,
+            notes: itemToSave.notes || null,
+            created_at: itemToSave.created_at,
+            updated_at: itemToSave.updated_at,
+          };
+
+          let { data, error } = await supabase
             .from('assignments')
-            .upsert({ ...itemToSave, user_id: user.user.id })
+            .upsert(payload)
             .select()
             .single();
+
+          // If foreign key constraint failed on subject_id (e.g. subject not yet in cloud table),
+          // retry with subject_id: null so the user's assignment is never lost!
+          if (error && (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('subject_id'))) {
+            console.warn('[Supabase] Retrying assignment upsert with subject_id: null due to FK');
+            const retryRes = await supabase
+              .from('assignments')
+              .upsert({ ...payload, subject_id: null })
+              .select()
+              .single();
+            data = retryRes.data;
+            error = retryRes.error;
+          }
+
           if (error) throw error;
           this.setSyncState('synced');
-          return data;
+          return data || itemToSave;
         }
       } catch (err) {
         console.error('[Supabase] Error saving assignment to cloud:', err);
@@ -331,15 +377,19 @@ class DataService {
   async saveExam(exam: Exam): Promise<Exam> {
     this.setSyncState('saving');
     const local = this.getLocal<Exam[]>('exams', DEFAULT_EXAMS);
-    const index = local.findIndex((e) => e.id === exam.id);
-    const updated = [...local];
+    const validId = ensureUUID(exam.id);
+    const validSubjectId = sanitizeUUIDOrNull(exam.subject_id);
+
     const itemToSave: Exam = {
       ...exam,
-      id: exam.id || 'ex-' + Date.now(),
+      id: validId,
+      subject_id: validSubjectId,
       created_at: exam.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
+    const index = local.findIndex((e) => e.id === itemToSave.id);
+    const updated = [...local];
     if (index >= 0) {
       updated[index] = itemToSave;
     } else {
@@ -352,14 +402,43 @@ class DataService {
       try {
         const { data: user } = await supabase.auth.getUser();
         if (user?.user) {
-          const { data, error } = await supabase
+          const payload = {
+            id: itemToSave.id,
+            user_id: user.user.id,
+            subject_id: validSubjectId,
+            name: itemToSave.name,
+            exam_date: itemToSave.exam_date,
+            syllabus: itemToSave.syllabus || null,
+            notes: itemToSave.notes || null,
+            priority: itemToSave.priority,
+            status: itemToSave.status,
+            grade: itemToSave.grade,
+            max_grade: itemToSave.max_grade,
+            weight_percentage: itemToSave.weight_percentage || null,
+            created_at: itemToSave.created_at,
+            updated_at: itemToSave.updated_at,
+          };
+
+          let { data, error } = await supabase
             .from('exams')
-            .upsert({ ...itemToSave, user_id: user.user.id })
+            .upsert(payload)
             .select()
             .single();
+
+          if (error && (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('subject_id'))) {
+            console.warn('[Supabase] Retrying exam upsert with subject_id: null due to FK');
+            const retryRes = await supabase
+              .from('exams')
+              .upsert({ ...payload, subject_id: null })
+              .select()
+              .single();
+            data = retryRes.data;
+            error = retryRes.error;
+          }
+
           if (error) throw error;
           this.setSyncState('synced');
-          return data;
+          return data || itemToSave;
         }
       } catch (err) {
         console.error('[Supabase] Error saving exam to cloud:', err);
@@ -418,9 +497,15 @@ class DataService {
 
   async saveStudySession(session: StudySession): Promise<StudySession> {
     const local = this.getLocal<StudySession[]>('study_sessions', DEFAULT_STUDY_SESSIONS);
+    const validId = ensureUUID(session.id);
+    const validSubjectId = sanitizeUUIDOrNull(session.subject_id);
+    const validAssignmentId = sanitizeUUIDOrNull(session.assignment_id);
+
     const item: StudySession = {
       ...session,
-      id: session.id || 'ses-' + Date.now(),
+      id: validId,
+      subject_id: validSubjectId,
+      assignment_id: validAssignmentId,
       created_at: session.created_at || new Date().toISOString(),
     };
     const updated = [item, ...local];
@@ -431,13 +516,25 @@ class DataService {
       try {
         const { data: user } = await supabase.auth.getUser();
         if (user?.user) {
+          const payload = {
+            id: item.id,
+            user_id: user.user.id,
+            subject_id: validSubjectId,
+            assignment_id: validAssignmentId,
+            description: item.description || null,
+            start_time: item.start_time,
+            end_time: item.end_time || null,
+            duration_minutes: item.duration_minutes || 0,
+            completed: item.completed ?? true,
+            created_at: item.created_at,
+          };
           const { data, error } = await supabase
             .from('study_sessions')
-            .insert({ ...item, user_id: user.user.id })
+            .insert(payload)
             .select()
             .single();
           if (error) throw error;
-          return data;
+          return data || item;
         }
       } catch (err) {
         console.error('[Supabase] Error saving study session:', err);

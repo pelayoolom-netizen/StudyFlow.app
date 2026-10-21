@@ -18,6 +18,7 @@ import {
 import confetti from 'canvas-confetti';
 import { Assignment, Priority, AssignmentStatus, Subject, Exam } from '../types';
 import { AiAddModal } from '../components/AiAddModal';
+import { generateUUID } from '../lib/uuid';
 
 interface Props {
   assignments: Assignment[];
@@ -125,7 +126,7 @@ export const AssignmentsView: React.FC<Props> = ({
   const handleDuplicate = async (asg: Assignment) => {
     const duplicated: Assignment = {
       ...asg,
-      id: 'asg-' + Date.now(),
+      id: generateUUID(),
       title: `${asg.title} (Copia)`,
       status: 'pendiente',
       completed_at: null,
@@ -140,7 +141,7 @@ export const AssignmentsView: React.FC<Props> = ({
     if (!formTitle.trim()) return;
 
     const payload: Assignment = {
-      id: editingAssignment ? editingAssignment.id : 'asg-' + Date.now(),
+      id: editingAssignment ? editingAssignment.id : generateUUID(),
       title: formTitle.trim(),
       description: formDescription.trim() || undefined,
       subject_id: formSubjectId || null,
@@ -619,7 +620,7 @@ export const AssignmentsView: React.FC<Props> = ({
                         onClick={async () => {
                           if (!newSubjectName.trim()) return;
                           const saved = await onSaveSubject({
-                            id: 'sub-' + Date.now(),
+                            id: generateUUID(),
                             name: newSubjectName.trim(),
                             color: newSubjectColor,
                             weekly_goal_minutes: 120,

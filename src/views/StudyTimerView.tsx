@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { StudySession, Subject, Assignment } from '../types';
+import { generateUUID } from '../lib/uuid';
 
 interface Props {
   subjects: Subject[];
@@ -175,7 +176,7 @@ export const StudyTimerView: React.FC<Props> = ({
 
       // Save session into DB
       const session: StudySession = {
-        id: 'ses-' + Date.now(),
+        id: generateUUID(),
         subject_id: selectedSubjectId || null,
         assignment_id: selectedAssignmentId || null,
         description: sessionDescription.trim() || undefined,

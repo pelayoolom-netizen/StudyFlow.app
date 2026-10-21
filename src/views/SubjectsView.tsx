@@ -13,6 +13,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { Subject, Assignment, Exam, StudySession } from '../types';
+import { generateUUID } from '../lib/uuid';
 
 interface Props {
   subjects: Subject[];
@@ -87,7 +88,7 @@ export const SubjectsView: React.FC<Props> = ({
     if (!name.trim()) return;
 
     const payload: Subject = {
-      id: editingSubject ? editingSubject.id : 'sub-' + Date.now(),
+      id: editingSubject ? editingSubject.id : generateUUID(),
       name: name.trim(),
       color,
       teacher: teacher.trim() || undefined,

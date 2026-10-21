@@ -17,6 +17,7 @@ import {
 import confetti from 'canvas-confetti';
 import { Exam, Priority, ExamStatus, Subject, Assignment } from '../types';
 import { AiAddModal } from '../components/AiAddModal';
+import { generateUUID } from '../lib/uuid';
 
 interface Props {
   exams: Exam[];
@@ -115,7 +116,7 @@ export const ExamsView: React.FC<Props> = ({
     const parsedWeight = weightPercentage.trim() !== '' ? Number(weightPercentage) : null;
 
     const payload: Exam = {
-      id: editingExam ? editingExam.id : 'ex-' + Date.now(),
+      id: editingExam ? editingExam.id : generateUUID(),
       name: name.trim(),
       subject_id: subjectId || null,
       exam_date: new Date(examDate).toISOString(),
@@ -599,7 +600,7 @@ export const ExamsView: React.FC<Props> = ({
                         onClick={async () => {
                           if (!newSubjectName.trim()) return;
                           const saved = await onSaveSubject({
-                            id: 'sub-' + Date.now(),
+                            id: generateUUID(),
                             name: newSubjectName.trim(),
                             color: newSubjectColor,
                             weekly_goal_minutes: 120,

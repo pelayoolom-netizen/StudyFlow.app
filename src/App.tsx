@@ -24,7 +24,8 @@ import { dataService, SyncState } from './lib/storage';
 import { getSupabaseClient } from './lib/supabase';
 import { registerServiceWorker } from './lib/pushNotifications';
 import { startReminderEngine } from './lib/reminderScheduler';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, CheckCircle2, RotateCcw, X } from 'lucide-react';
+import { SavedAiItem } from './components/AiAddModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -60,6 +61,13 @@ export default function App() {
   // Pre-fill states for Timer
   const [timerSubjectId, setTimerSubjectId] = useState<string | undefined>(undefined);
   const [timerAssignmentId, setTimerAssignmentId] = useState<string | undefined>(undefined);
+
+  // Undo and Success Toast for AI-added tasks
+  const [aiSuccessToast, setAiSuccessToast] = useState<{
+    message: string;
+    items: SavedAiItem[];
+  } | null>(null);
+  const [undoStatusMessage, setUndoStatusMessage] = useState<string | null>(null);
 
   // Listen to online / offline status
   useEffect(() => {
@@ -188,6 +196,44 @@ export default function App() {
     await dataService.deleteExam(id);
     setExams((prev) => prev.filter((e) => e.id !== id));
   };
+
+  // Undo AI batch addition
+  const handleUndoLastAiBatch = async () => {
+    if (!aiSuccessToast || aiSuccessToast.items.length === 0) return;
+    const itemsToUndo = [...aiSuccessToast.items];
+    setAiSuccessToast(null);
+
+    let undoneCount = 0;
+    for (const item of itemsToUndo) {
+      try {
+        if (item.type === 'deber') {
+          await handleDeleteAssignment(item.id);
+          undoneCount++;
+        } else {
+          await handleDeleteExam(item.id);
+          undoneCount++;
+        }
+      } catch (err) {
+        console.error('Error al deshacer elemento:', err);
+      }
+    }
+    setUndoStatusMessage(`Acción deshecha: se eliminaron los ${undoneCount} elementos creados.`);
+  };
+
+  // Auto-dismiss timers
+  useEffect(() => {
+    if (aiSuccessToast) {
+      const t = setTimeout(() => setAiSuccessToast(null), 12000);
+      return () => clearTimeout(t);
+    }
+  }, [aiSuccessToast]);
+
+  useEffect(() => {
+    if (undoStatusMessage) {
+      const t = setTimeout(() => setUndoStatusMessage(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [undoStatusMessage]);
 
   // Handlers for Subjects
   const handleSaveSubject = async (sub: Subject) => {
@@ -413,10 +459,66 @@ export default function App() {
         onSaveAssignment={handleSaveAssignment}
         onSaveExam={handleSaveExam}
         onSaveSubject={handleSaveSubject}
-        onSuccessSaved={() => {
-          // Data is automatically saved into local/cloud storage and updated in state
+        onSuccessSaved={(summary) => {
+          let parts: string[] = [];
+          if (summary.assignmentsCount > 0) {
+            parts.push(`${summary.assignmentsCount} ${summary.assignmentsCount === 1 ? 'deber' : 'deberes'}`);
+          }
+          if (summary.examsCount > 0) {
+            parts.push(`${summary.examsCount} ${summary.examsCount === 1 ? 'examen' : 'exámenes'}`);
+          }
+          const summaryStr = parts.length > 0
+            ? `Se han añadido ${parts.join(' y ')}.`
+            : 'Tareas procesadas con éxito.';
+
+          setAiSuccessToast({
+            message: summaryStr,
+            items: summary.savedItems,
+          });
         }}
       />
+
+      {/* Undo / Success Banner for AI Tasks */}
+      {aiSuccessToast && (
+        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-md p-3.5 rounded-2xl bg-[#0f172a] border border-emerald-500/40 shadow-2xl shadow-emerald-950/60 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-4">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="text-xs font-bold text-white block truncate">
+                {aiSuccessToast.message}
+              </span>
+              <span className="text-[11px] text-zinc-400 truncate block">
+                Guardados automáticamente en tu horario
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={handleUndoLastAiBatch}
+              className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold flex items-center gap-1 transition cursor-pointer active:scale-95"
+              title="Deshacer creación de tareas"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Deshacer</span>
+            </button>
+            <button
+              onClick={() => setAiSuccessToast(null)}
+              className="p-1 rounded-lg text-zinc-500 hover:text-white transition cursor-pointer"
+              title="Cerrar aviso"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Status toast for undo */}
+      {undoStatusMessage && (
+        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 p-3 rounded-xl bg-zinc-900 border border-zinc-700 text-xs font-semibold text-zinc-200 shadow-xl flex items-center gap-2 animate-in fade-in">
+          <RotateCcw className="w-4 h-4 text-amber-400" />
+          <span>{undoStatusMessage}</span>
+        </div>
+      )}
 
       {/* Supabase Authentication & Cloud Setup Modal */}
       <AuthModal

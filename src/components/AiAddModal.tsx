@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Sparkles, Loader2, AlertCircle, X, ArrowRight, CornerDownLeft } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Assignment, Exam, Subject, Priority } from '../types';
+import { generateUUID } from '../lib/uuid';
 
 export interface ParsedItem {
   id: string;
@@ -13,6 +14,14 @@ export interface ParsedItem {
   dateDescription?: string;
   priority: Priority;
   notes?: string;
+}
+
+export interface SavedAiItem {
+  id: string;
+  title: string;
+  type: 'deber' | 'examen';
+  subject: string;
+  date: string;
 }
 
 interface Props {
@@ -28,7 +37,7 @@ interface Props {
     assignmentsCount: number;
     examsCount: number;
     duplicatesSkipped: number;
-    savedItems: { title: string; type: string; subject: string; date: string }[];
+    savedItems: SavedAiItem[];
   }) => void;
 }
 
@@ -140,16 +149,35 @@ export const AiAddModal: React.FC<Props> = ({
         }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const responseText = await response.text();
 
-      if (!response.ok) {
-        if (data.missingKey) {
-          setIsMissingApiKey(true);
+      let data: any = null;
+      if (contentType.includes('application/json')) {
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error('El servidor de IA devolvió una respuesta que no es JSON válido. Por favor, reintenta.');
         }
-        throw new Error(data.error || 'Error al comunicarse con el servidor de IA.');
+      } else {
+        // Handle non-JSON or HTML responses (such as 404, 405 or 503 from proxies)
+        if (response.status === 404 || response.status === 405) {
+          throw new Error(`El servicio de IA no está disponible en este momento (HTTP ${response.status}). Comprueba las rutas del servidor.`);
+        } else if (response.status === 503) {
+          throw new Error('El servicio de Gemini tiene una sobrecarga temporal de peticiones. Por favor, espera unos segundos y vuelve a pulsar «Añadir».');
+        } else {
+          throw new Error(`Error en el servidor (${response.status}): ${responseText.slice(0, 120)}`);
+        }
       }
 
-      const items: ParsedItem[] = Array.isArray(data.items) ? data.items : [];
+      if (!response.ok) {
+        if (data?.missingKey) {
+          setIsMissingApiKey(true);
+        }
+        throw new Error(data?.error || 'Error al comunicarse con el servidor de IA.');
+      }
+
+      const items: ParsedItem[] = Array.isArray(data?.items) ? data.items : [];
 
       if (items.length === 0) {
         setErrorMessage(
@@ -168,7 +196,7 @@ export const AiAddModal: React.FC<Props> = ({
       let createdAssignments = 0;
       let createdExams = 0;
       let duplicatesSkipped = 0;
-      const savedItemsList: { title: string; type: string; subject: string; date: string }[] = [];
+      const savedItemsList: SavedAiItem[] = [];
 
       // Avoid creating duplicates within the same batch
       const addedKeysInBatch = new Set<string>();
@@ -184,7 +212,7 @@ export const AiAddModal: React.FC<Props> = ({
         if (!matchedSubject && onSaveSubject) {
           const randomColor = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)];
           const newSub: Subject = {
-            id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: generateUUID(),
             name: item.subject.trim() || 'General',
             color: randomColor,
             weekly_goal_minutes: 120,
@@ -214,10 +242,11 @@ export const AiAddModal: React.FC<Props> = ({
 
         addedKeysInBatch.add(batchKey);
 
-        // Save Assignment or Exam
+        // Save Assignment or Exam with valid UUID
         if (item.type === 'deber') {
+          const newItemId = generateUUID();
           const newAssignment: Assignment = {
-            id: `asg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: newItemId,
             title: titleClean,
             description: item.notes?.trim() || undefined,
             subject_id: subjectId,
@@ -232,14 +261,16 @@ export const AiAddModal: React.FC<Props> = ({
           await onSaveAssignment(newAssignment);
           createdAssignments++;
           savedItemsList.push({
+            id: newItemId,
             title: titleClean,
             type: 'deber',
             subject: subjectName,
             date: item.date,
           });
         } else {
+          const newItemId = generateUUID();
           const newExam: Exam = {
-            id: `ex-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id: newItemId,
             name: titleClean,
             subject_id: subjectId,
             exam_date: new Date(item.date).toISOString(),
@@ -254,6 +285,7 @@ export const AiAddModal: React.FC<Props> = ({
           await onSaveExam(newExam);
           createdExams++;
           savedItemsList.push({
+            id: newItemId,
             title: titleClean,
             type: 'examen',
             subject: subjectName,
@@ -280,11 +312,16 @@ export const AiAddModal: React.FC<Props> = ({
 
       onClose();
     } catch (err: any) {
-      console.error('Error al procesar y guardar con IA:', err);
+      console.error('[AiAddModal] Error al procesar y guardar:', err);
+      let userMsg = err?.message || 'Ocurrió un error inesperado al interpretar o guardar las tareas.';
+      
+      // Translate any WebKit / Safari pattern or syntax error
+      if (userMsg.toLowerCase().includes('pattern') || userMsg.toLowerCase().includes('syntaxerror')) {
+        userMsg = 'El servidor devolvió un formato no esperado al interpretar el texto. Por favor, vuelve a pulsar «Añadir».';
+      }
+
       // Retain the text so the user can edit or retry without losing what they typed
-      setErrorMessage(
-        err.message || 'Ocurrió un error inesperado al interpretar o guardar las tareas. Tu texto se conserva para reintentar.'
-      );
+      setErrorMessage(userMsg);
     } finally {
       setIsProcessing(false);
     }

@@ -27,6 +27,7 @@ import {
 import confetti from 'canvas-confetti';
 import { Assignment, Exam, Subject, ActiveTab, StudySession, Priority, AssignmentStatus } from '../types';
 import { AiAddModal } from '../components/AiAddModal';
+import { generateUUID } from '../lib/uuid';
 
 interface Props {
   userName?: string;
@@ -311,7 +312,7 @@ export const DashboardView: React.FC<Props> = ({
     if (!taskTitle.trim()) return;
 
     const payload: Assignment = {
-      id: editingTask ? editingTask.id : 'asg-' + Date.now(),
+      id: editingTask ? editingTask.id : generateUUID(),
       title: taskTitle.trim(),
       description: taskDescription.trim() || undefined,
       subject_id: taskSubjectId || null,
@@ -370,7 +371,7 @@ export const DashboardView: React.FC<Props> = ({
     const parsedGrade = examGrade.trim() !== '' ? Number(examGrade) : null;
 
     const payload: Exam = {
-      id: 'ex-' + Date.now(),
+      id: generateUUID(),
       name: examName.trim(),
       subject_id: examSubjectId || null,
       exam_date: new Date(examDate).toISOString(),
@@ -391,7 +392,7 @@ export const DashboardView: React.FC<Props> = ({
   const handleCreateInlineSubject = async () => {
     if (!newSubjectName.trim()) return;
     const newSub: Subject = {
-      id: 'sub-' + Date.now(),
+      id: generateUUID(),
       name: newSubjectName.trim(),
       color: newSubjectColor,
       weekly_goal_minutes: 120,

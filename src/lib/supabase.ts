@@ -1,8 +1,26 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Get configuration from env or local storage
-const envUrl = import.meta.env.VITE_SUPABASE_URL;
-const envAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Get configuration safely across Vite client and Node.js environments
+const getEnvVar = (key: string): string => {
+  try {
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
+      return (import.meta as any).env[key];
+    }
+  } catch {
+    // import.meta not available
+  }
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key] || '';
+    }
+  } catch {
+    // process not available
+  }
+  return '';
+};
+
+const envUrl = getEnvVar('VITE_SUPABASE_URL') || getEnvVar('SUPABASE_URL');
+const envAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY') || getEnvVar('SUPABASE_ANON_KEY');
 
 export const getSupabaseConfig = () => {
   const localUrl = typeof window !== 'undefined' ? localStorage.getItem('studyflow_custom_supabase_url') : null;
